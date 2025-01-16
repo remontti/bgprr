@@ -4,17 +4,23 @@ API bgpview.io
 ### Requisitos:
 ```apt install python3-requests python3-tabulate wget```
 
-### Instalação:
+### Instalação Servidor Remontti:
 ```
 wget remontti.com.br/bgprr -O /bin/bgprr
 chmod +x /bin/bgprr
 ```
-
-### Saída: 
+### Instalação Servidor Github:
 ```
-$ bgprr 
+wget https://raw.githubusercontent.com/remontti/bgprr/refs/heads/main/bgprr -O /bin/bgprr
+chmod +x /bin/bgprr
+```
+
+### Uso: 
+```
+bgprr
 Insira um ASN (por exemplo, 15169) ou um nome para pesquisar: netflix
 Procurando por ASNs correspondentes 'netflix'...
+
 ╒═══════╤═════════════╤════════╤═══════╕
 │ AS    │ Nome        │ País   │ Rir   │
 ╞═══════╪═════════════╪════════╪═══════╡
@@ -23,7 +29,7 @@ Procurando por ASNs correspondentes 'netflix'...
 ```
 
 ```
-$ bgprr 
+bgprr 
 Insira um ASN (por exemplo, 15169) ou um nome para pesquisar: 53218
 ╒═════════════════════════════════════╕
 │ AS 65530 - BR - Lacnic - 28/10/2010 │
