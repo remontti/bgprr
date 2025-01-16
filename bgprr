@@ -1,0 +1,294 @@
+#!/usr/bin/env python3
+
+"""
+Autor: Rudimar Remontti + GPT
+
+Requisitos:
+apt install python3-requests python3-tabulate wget
+
+Instalação:
+wget remontti.com.br/bgprr -O /bin/bgprr
+chmod +x /bin/bgprr
+"""
+
+import requests
+import time
+from tabulate import tabulate
+
+def get_asn_details(asn):
+    """
+    Busca detalhes sobre um ASN usando a API BGPView e exibe os dados.
+
+    :param asn: Número de Sistema Autônomo (ASN) como uma string (ex.: 'AS15169').
+    """
+    url = f"https://api.bgpview.io/asn/{asn.strip('AS')}"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        dados = response.json()
+
+        if dados['status'] == 'ok':
+            detalhes = dados['data']
+            tabela = [[
+                f"AS {detalhes['asn']} - {detalhes['country_code']} - {detalhes.get('rir_allocation', {}).get('rir_name', 'N/A')} - {detalhes.get('rir_allocation', {}).get('date_allocated', 'N/A').split(' ')[0].replace('-', '/')[8:10]}/{detalhes.get('rir_allocation', {}).get('date_allocated', 'N/A').split(' ')[0].replace('-', '/')[5:7]}/{detalhes.get('rir_allocation', {}).get('date_allocated', 'N/A').split(' ')[0].replace('-', '/')[0:4]}\n{detalhes['name']}\nSite: {detalhes.get('website', 'N/A')}\nContatos: {', '.join(detalhes.get('email_contacts', [])) if detalhes.get('email_contacts') else 'N/A'}"
+            ]]
+            print(tabulate(tabela, tablefmt="fancy_grid", numalign="left", stralign="left", showindex=False))
+            return detalhes
+        else:
+            print("Erro: ASN inválido ou nenhum dado disponível.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro: Falha na solicitação: {e}")
+        return None
+
+def get_asn_prefixes(asn):
+    """
+    Busca prefixos de um ASN usando a API BGPView e exibe os dados.
+
+    :param asn: Número de Sistema Autônomo (ASN) como uma string (ex.: 'AS15169').
+    """
+    url = f"https://api.bgpview.io/asn/{asn.strip('AS')}/prefixes"
+    tentativas = 5
+    for tentativa in range(tentativas):
+        try:
+            response = requests.get(url)
+            if response.status_code == 429:  # Muitas solicitações
+                tempo_espera = 2 ** tentativa
+                print(f"Limite de taxa atingido. Tentando novamente em {tempo_espera} segundos...")
+                time.sleep(tempo_espera)
+                continue
+            response.raise_for_status()
+            dados = response.json()
+
+            if dados['status'] == 'ok':
+                dados_prefixos = dados['data']
+                prefixos_ipv4 = dados_prefixos.get('ipv4_prefixes', [])
+                prefixos_ipv6 = dados_prefixos.get('ipv6_prefixes', [])
+
+                if prefixos_ipv4:
+                    linhas_ipv4 = [f"{'✅' if prefixo['roa_status'] == 'Valid' else '❌'} {prefixo['prefix']}" for prefixo in prefixos_ipv4]
+                    print(tabulate([[
+                        "\n".join(linhas_ipv4)
+                    ]], headers=["Prefixos IPv4"], tablefmt="fancy_grid", numalign="left", stralign="left", showindex=False))
+
+                if prefixos_ipv6:
+                    linhas_ipv6 = [f"{'✅' if prefixo['roa_status'] == 'Valid' else '❌'} {prefixo['prefix']}" for prefixo in prefixos_ipv6]
+                    print(tabulate([[
+                        "\n".join(linhas_ipv6)
+                    ]], headers=["Prefixos IPv6"], tablefmt="fancy_grid", numalign="left", stralign="left", showindex=False))
+
+                return dados_prefixos
+            else:
+                print("Erro: ASN inválido ou nenhum dado disponível.")
+                return None
+
+        except requests.exceptions.RequestException as e:
+            print(f"Erro: Falha na solicitação: {e}")
+            return None
+
+    print("Erro: Número máximo de tentativas excedido.")
+    return None
+
+def consolidate_peers(peers_ipv4, peers_ipv6):
+    """
+    Consolida peers IPv4 e IPv6 em uma única lista, evitando duplicações.
+
+    :param peers_ipv4: Lista de peers IPv4.
+    :param peers_ipv6: Lista de peers IPv6.
+    :return: Lista consolidada de peers com indicadores IPv4 e IPv6.
+    """
+    consolidados = {}
+
+    for peer in peers_ipv4:
+        consolidados[peer['asn']] = {
+            'ASN': peer['asn'],
+            'Nome': peer['name'],
+            'País': peer['country_code'],
+            'IPv4': '✅',
+            'IPv6': '❌'
+        }
+
+    for peer in peers_ipv6:
+        if peer['asn'] in consolidados:
+            consolidados[peer['asn']]['IPv6'] = '✅'
+        else:
+            consolidados[peer['asn']] = {
+                'ASN': peer['asn'],
+                'Nome': peer['name'],
+                'País': peer['country_code'],
+                'IPv4': '❌',
+                'IPv6': '✅'
+            }
+
+    return list(consolidados.values())
+
+def get_asn_upstreams(asn):
+    """
+    Busca upstreams de um ASN e exibe os dados.
+
+    :param asn: Número de Sistema Autônomo (ASN) como uma string (ex.: 'AS15169').
+    """
+    url = f"https://api.bgpview.io/asn/{asn.strip('AS')}/upstreams"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        dados = response.json()
+
+        if dados['status'] == 'ok':
+            upstreams = dados['data']
+            peers_ipv4 = upstreams.get('ipv4_upstreams', [])
+            peers_ipv6 = upstreams.get('ipv6_upstreams', [])
+
+            linhas = consolidate_peers(peers_ipv4, peers_ipv6)
+
+            print(tabulate(linhas, headers="keys", tablefmt="fancy_grid", numalign="left", stralign="left"))
+            return upstreams
+        else:
+            print("Erro: ASN inválido ou nenhum dado disponível.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro: Falha na solicitação: {e}")
+        return None
+
+def get_asn_downstreams(asn):
+    """
+    Busca downstreams de um ASN e exibe os dados.
+
+    :param asn: Número de Sistema Autônomo (ASN) como uma string (ex.: 'AS15169').
+    """
+    url = f"https://api.bgpview.io/asn/{asn.strip('AS')}/downstreams"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        dados = response.json()
+
+        if dados['status'] == 'ok':
+            downstreams = dados['data']
+            peers_ipv4 = downstreams.get('ipv4_downstreams', [])
+            peers_ipv6 = downstreams.get('ipv6_downstreams', [])
+
+            linhas = consolidate_peers(peers_ipv4, peers_ipv6)
+
+            print(tabulate(linhas, headers="keys", tablefmt="fancy_grid", numalign="left", stralign="left"))
+            return downstreams
+        else:
+            print("Erro: ASN inválido ou nenhum dado disponível.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro: Falha na solicitação: {e}")
+        return None
+
+def get_asn_ixs(asn):
+    """
+    Busca detalhes de IX (Internet Exchange) de um ASN e exibe os dados.
+
+    :param asn: Número de Sistema Autônomo (ASN) como uma string (ex.: 'AS15169').
+    """
+    url = f"https://api.bgpview.io/asn/{asn.strip('AS')}/ixs"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        dados = response.json()
+
+        if dados['status'] == 'ok':
+            ixs = dados['data']
+
+            linhas = []
+            for ix in ixs:
+                linhas.append([
+                    ix['name'],
+                    ix['country_code'],
+                    ix['city'],
+                    ix.get('ipv4_address', 'N/A'),
+                    ix.get('ipv6_address', 'N/A'),
+                    f"{ix['speed'] / 1000:.2f} Gbps"
+                ])
+
+            print(tabulate(linhas, headers=["Nome", "País", "Cidade", "IPv4", "IPv6", "Velocidade"], tablefmt="fancy_grid", numalign="left", stralign="left"))
+            return ixs
+        else:
+            print("Erro: ASN inválido ou nenhum dado disponível.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro: Falha na solicitação: {e}")
+        return None
+
+def search_asn_by_name(query):
+    """
+    Busca por ASNs pelo nome usando a API BGPView e exibe os resultados.
+
+    :param query: Termo de busca (ex.: 'google').
+    """
+    url = f"https://api.bgpview.io/search?query_term={query}"
+
+    try:
+        response = requests.get(url)
+        response.raise_for_status()
+        dados = response.json()
+
+        if dados['status'] == 'ok':
+            asns = dados['data'].get('asns', [])
+
+            linhas = []
+            for asn in asns:
+                linhas.append([
+                    asn['asn'],
+                    asn['name'],
+                    asn['country_code'],
+                    asn['rir_name']
+                ])
+
+            if linhas:
+                print(tabulate(linhas, headers=["AS", "Nome", "País", "Rir"], tablefmt="fancy_grid", numalign="left", stralign="left"))
+            else:
+                print("Nenhum ASN encontrado para a consulta fornecida.")
+
+            return asns
+        else:
+            print("Erro: Nenhum dado disponível.")
+            return None
+
+    except requests.exceptions.RequestException as e:
+        print(f"Erro: Falha na solicitação: {e}")
+        return None
+
+if __name__ == "__main__":
+    # Solicita ao usuário um ASN ou nome para buscar
+    entrada_usuario = input("Insira um ASN (ex.: 15169) ou um nome para pesquisar: ")
+
+    if entrada_usuario.isdigit():
+        # Busca detalhes do ASN
+        detalhes = get_asn_details(entrada_usuario)
+        time.sleep(1)
+
+        # Busca prefixos do ASN
+        if detalhes:
+            get_asn_prefixes(entrada_usuario)
+            print("RPKI ✅/❌")
+            time.sleep(1)
+
+            # Busca upstreams do ASN
+            print('\nUpstreams:')
+            get_asn_upstreams(entrada_usuario)
+            time.sleep(1)
+
+            # Busca downstreams do ASN
+            print('\nDownstreams:')
+            get_asn_downstreams(entrada_usuario)
+            time.sleep(1)
+
+            # Busca IXs do ASN
+            print('\nIXs:')
+            get_asn_ixs(entrada_usuario)
+            time.sleep(1)
+    else:
+        print(f"Procurando por ASNs correspondentes a '{entrada_usuario}'...")
+        search_asn_by_name(entrada_usuario)
